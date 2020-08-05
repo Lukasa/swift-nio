@@ -567,10 +567,9 @@ final class DatagramChannel: BaseSocketChannel<Socket> {
 
             // This force-unwrap is safe, as we checked whether this is nil in the caller.
             let result = try vectorReadManager.readFromSocket(
+                socket: self.socket,
                 buffer: &buffer,
-                reportExplicitCongestionNotifications: self.reportExplicitCongestionNotifications) { msgvec in
-                    return try self.socket.recvmmsg(msgs: msgvec)
-            }
+                reportExplicitCongestionNotifications: self.reportExplicitCongestionNotifications)
             switch result {
             case .some(let results, let totalRead):
                 assert(self.isOpen)

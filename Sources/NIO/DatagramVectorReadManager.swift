@@ -85,11 +85,12 @@ struct DatagramVectorReadManager {
     ///     buffer.
     ///
     /// - parameters:
+    ///     - socket: The underlying socket from which to read.
     ///     - buffer: The single large buffer into which reads will be written.
     ///     - reportExplicitCongestionNotifications: Should explicit congestion notifications be reported up using metadata.
-    func readFromSocket(buffer: inout ByteBuffer,
-                        reportExplicitCongestionNotifications: Bool,
-                        readFunction: (UnsafeMutableBufferPointer<MMsgHdr>) throws -> IOResult<Int>) throws -> ReadResult {
+    func readFromSocket(socket: Socket,
+                        buffer: inout ByteBuffer,
+                        reportExplicitCongestionNotifications: Bool) throws -> ReadResult {
         assert(buffer.readerIndex == 0, "Buffer was not cleared between calls to readFromSocket!")
 
         let messageSize = buffer.capacity / self.messageCount
@@ -124,7 +125,7 @@ struct DatagramVectorReadManager {
             }
 
             // We've set up our pointers, it's time to get going. We now issue the call.
-            return try readFunction(self.messageVector)
+            return try socket.recvmmsg(msgs: self.messageVector)
         }
 
         switch result {
