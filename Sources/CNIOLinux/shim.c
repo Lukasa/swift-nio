@@ -27,6 +27,7 @@ void CNIOLinux_i_do_nothing_just_working_around_a_darwin_toolchain_bug(void) {}
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <assert.h>
+#include <string.h>
 #include <time.h>
 
 _Static_assert(sizeof(CNIOLinux_mmsghdr) == sizeof(struct mmsghdr),
@@ -180,6 +181,24 @@ bool CNIOLinux_supports_udp_gro() {
 
 int CNIOLinux_system_info(struct utsname* uname_data) {
     return uname(uname_data);
+}
+
+unsigned long CNIOLinux_get_tunsetiff(void) {
+    return TUNSETIFF;
+}
+
+void CNIOLinux_ifr_setName(struct ifreq *ifr, const char *name) {
+    // We forcibly null-terminate here.
+    strncpy(ifr->ifr_name, name, IFNAMSIZ);
+    ifr->ifr_name[IFNAMSIZ - 1] = '\0';
+}
+
+char *CNIOLinux_ifr_getName0(struct ifreq *ifr) {
+    return ifr->ifr_name;
+}
+
+void CNIOLinux_set_ifr_flags(struct ifreq *ifr, int flags) {
+    ifr->ifr_flags = flags;
 }
 
 #endif

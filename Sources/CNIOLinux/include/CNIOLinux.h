@@ -18,6 +18,7 @@
 #include <poll.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <sys/timerfd.h>
 #include <sys/sysinfo.h>
 #include <sys/socket.h>
@@ -26,8 +27,11 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <pthread.h>
+#include <net/if.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
 #include "liburing_nio.h"
 
 #if __has_include(<linux/mptcp.h>)
@@ -113,6 +117,12 @@ bool CNIOLinux_supports_udp_segment();
 bool CNIOLinux_supports_udp_gro();
 
 int CNIOLinux_system_info(struct utsname* uname_data);
+
+// ifr stuff
+unsigned long CNIOLinux_get_tunsetiff(void);
+void CNIOLinux_ifr_setName(struct ifreq *ifr, const char *name);
+char *CNIOLinux_ifr_getName0(struct ifreq *ifr);
+void CNIOLinux_set_ifr_flags(struct ifreq *ifr, int flags);
 
 #endif
 #endif

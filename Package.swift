@@ -93,6 +93,8 @@ var targets: [PackageDescription.Target] = [
     .executableTarget(name: "NIOUDPEchoClient",
                       dependencies: ["NIOPosix", "NIOCore"],
                       exclude: ["README.md"]),
+    .executableTarget(name: "NIOTunExample",
+            dependencies: ["NIOPosix", "NIOCore"]),
     .target(name: "NIOTestUtils",
             dependencies: ["NIOPosix", "NIOCore", "NIOEmbedded", "NIOHTTP1", swiftAtomics]),
     .executableTarget(name: "NIOCrashTester",
