@@ -686,10 +686,9 @@ final class DatagramChannel: BaseSocketChannel<Socket> {
             let (_, result) = try self.recvBufferPool.buffer(allocator: self.allocator) { buffer -> DatagramVectorReadManager.ReadResult in
                 // This force-unwrap is safe, as we checked whether this is nil in the caller.
                 try vectorReadManager.readFromSocket(
+                    socket: socket,
                     buffer: &buffer,
-                    parseControlMessages: self.reportExplicitCongestionNotifications || self.receivePacketInfo) { msgvec in
-                        return try self.socket.recvmmsg(msgs: msgvec)
-                    }
+                    parseControlMessages: self.reportExplicitCongestionNotifications || self.receivePacketInfo)
             }
 
             switch result {
