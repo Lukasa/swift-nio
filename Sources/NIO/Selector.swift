@@ -745,6 +745,8 @@ extension Selector where R == NIORegistration {
                 return closeChannel(chan)
             case .pipeChannel(let chan, _, _):
                 return closeChannel(chan)
+            case .tunTapChannel(let chan, _):
+                return closeChannel(chan)
             }
         }.map { future in
             future.flatMapErrorThrowing { error in

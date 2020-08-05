@@ -198,6 +198,18 @@ typealias IOVector = iovec
         }
     }
 
+    /// Read data from the socket, scattering the results into the iovecs.
+    ///
+    /// - parameters:
+    ///     - iovecs: The `IOVector`s to be filled.
+    /// - returns: The `IOResult` which indicates how much data could be read and if the operation returned before all could be read (because the socket is in non-blocking mode).
+    /// - throws: An `IOError` if the operation failed.
+    func readv(iovecs: UnsafeBufferPointer<IOVector>) throws -> IOResult<Int> {
+        return try withUnsafeHandle {
+            try Posix.readv(descriptor: $0, iovecs: iovecs)
+        }
+    }
+
     /// Receive data from the socket, along with aditional control information.
     ///
     /// - parameters:

@@ -89,6 +89,12 @@ final class PipePair: SocketProtocol {
         }
     }
 
+    func readv(iovecs: UnsafeBufferPointer<IOVector>) throws -> IOResult<Int> {
+        return try self.inputFD.withUnsafeHandle {
+            try Posix.readv(descriptor: $0, iovecs: iovecs)
+        }
+    }
+
     func recvmsg(pointer: UnsafeMutableRawBufferPointer,
                  storage: inout sockaddr_storage,
                  storageLen: inout socklen_t,

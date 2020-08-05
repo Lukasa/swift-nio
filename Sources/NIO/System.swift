@@ -53,6 +53,7 @@ private let sysClose = close
 private let sysShutdown = shutdown
 private let sysBind = bind
 private let sysFcntl: (CInt, CInt, CInt) -> CInt = fcntl
+private let sysIoctl: (CInt, CUnsignedLong, UnsafeMutableRawPointer) -> CInt = ioctl
 private let sysSocket = socket
 private let sysSetsockopt = setsockopt
 private let sysGetsockopt = getsockopt
@@ -65,6 +66,7 @@ private let sysFtruncate = ftruncate
 private let sysWrite = write
 private let sysPwrite = pwrite
 private let sysRead = read
+private let sysReadv = readv
 private let sysPread = pread
 private let sysLseek = lseek
 private let sysPoll = poll
@@ -255,6 +257,15 @@ internal enum Posix {
     }
 
     @inline(never)
+    @discardableResult
+    // TODO: Allow varargs
+    public static func ioctl(descriptor: CInt, request: CUnsignedLong, argument: UnsafeMutableRawPointer) throws -> CInt {
+        return try syscall(blocking: false) {
+            sysIoctl(descriptor, request, argument)
+        }.result
+    }
+
+    @inline(never)
     public static func socket(domain: NIOBSDSocket.ProtocolFamily, type: NIOBSDSocket.SocketType, `protocol`: CInt) throws -> CInt {
         return try syscall(blocking: false) {
             return sysSocket(domain.rawValue, type.rawValue, `protocol`)
@@ -374,6 +385,13 @@ internal enum Posix {
     public static func read(descriptor: CInt, pointer: UnsafeMutableRawPointer, size: size_t) throws -> IOResult<ssize_t> {
         return try syscall(blocking: true) {
             sysRead(descriptor, pointer, size)
+        }
+    }
+
+    @inline(never)
+    public static func readv(descriptor: CInt, iovecs: UnsafeBufferPointer<IOVector>) throws -> IOResult<ssize_t> {
+        return try syscall(blocking: true) {
+            sysReadv(descriptor, iovecs.baseAddress!, CInt(iovecs.count))
         }
     }
 

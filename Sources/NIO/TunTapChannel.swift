@@ -12,15 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-private let emptyAddress = try! SocketAddress(ipAddress: "0.0.0.0", port: 0)
-
 /// A channel used with tun/tap file descriptors in Linux
 final class TunTapChannel: BaseSocketChannel<PipePair> {
-    // Guard against re-entrance of flushNow() method.
-    private let pendingWrites: PendingDatagramWritesManager
+    private let pendingWrites: PendingTunTapWritesManager
 
-    /// Support for vector reads, if enabled.
-    private var vectorReadManager: Optional<DatagramVectorReadManager>
     // This is `Channel` API so must be thread-safe.
     override public var isWritable: Bool {
         return pendingWrites.isWritable
@@ -32,23 +27,12 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
         return super.isOpen
     }
 
-    deinit {
-        if var vectorReadManager = self.vectorReadManager {
-            vectorReadManager.deallocate()
-        }
-    }
-
     init(eventLoop: SelectableEventLoop, handle: NIOFileHandle) throws {
-        self.vectorReadManager = nil
         let extraHandle = try handle.withUnsafeFileDescriptor {
             NIOFileHandle(descriptor: dup($0))
         }
         let pipe = try PipePair(inputFD: handle, outputFD: extraHandle)
-        self.pendingWrites = PendingDatagramWritesManager(msgs: eventLoop.msgs,
-                                                          iovecs: eventLoop.iovecs,
-                                                          addresses: eventLoop.addresses,
-                                                          storageRefs: eventLoop.storageRefs,
-                                                          controlMessageStorage: eventLoop.controlMessageStorage)
+        self.pendingWrites = PendingTunTapWritesManager()
 
         try super.init(socket: pipe,
                        parent: nil,
@@ -70,13 +54,6 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
             pendingWrites.writeSpinCount = value as! UInt
         case _ as ChannelOptions.Types.WriteBufferWaterMarkOption:
             pendingWrites.waterMark = value as! ChannelOptions.Types.WriteBufferWaterMark
-        case _ as ChannelOptions.Types.DatagramVectorReadMessageCountOption:
-            // We only support vector reads on these OSes. Let us know if there's another OS with this syscall!
-            #if os(Linux) || os(FreeBSD) || os(Android)
-            self.vectorReadManager.updateMessageCount(value as! Int)
-            #else
-            break
-            #endif
         default:
             try super.setOption0(option, value: value)
         }
@@ -94,8 +71,6 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
             return pendingWrites.writeSpinCount as! Option.Value
         case _ as ChannelOptions.Types.WriteBufferWaterMarkOption:
             return pendingWrites.waterMark as! Option.Value
-        case _ as ChannelOptions.Types.DatagramVectorReadMessageCountOption:
-            return (self.vectorReadManager?.messageCount ?? 0) as! Option.Value
         default:
             return try super.getOption0(option)
         }
@@ -112,14 +87,6 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
     }
 
     override func readFromSocket() throws -> ReadResult {
-        if self.vectorReadManager != nil {
-            return try self.vectorReadFromSocket()
-        } else {
-            return try self.singleReadFromSocket()
-        }
-    }
-
-    private func singleReadFromSocket() throws -> ReadResult {
         var buffer = self.recvAllocator.buffer(allocator: self.allocator)
         var readResult = ReadResult.none
 
@@ -139,11 +106,8 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
                 let mayGrow = recvAllocator.record(actualReadBytes: bytesRead)
                 readPending = false
 
-                let msg = AddressedEnvelope(remoteAddress: emptyAddress,
-                                            data: buffer,
-                                            metadata: nil)
                 assert(self.isActive)
-                pipeline.fireChannelRead0(NIOAny(msg))
+                pipeline.fireChannelRead0(NIOAny(buffer))
                 if mayGrow && i < maxMessagesPerRead {
                     buffer = recvAllocator.buffer(allocator: allocator)
                 }
@@ -153,53 +117,6 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
                 return readResult
             }
         }
-        return readResult
-    }
-
-    private func vectorReadFromSocket() throws -> ReadResult {
-        var buffer = self.recvAllocator.buffer(allocator: self.allocator)
-        var readResult = ReadResult.none
-
-        readLoop: for i in 1...self.maxMessagesPerRead {
-            guard self.isOpen else {
-                throw ChannelError.eof
-            }
-            guard let vectorReadManager = self.vectorReadManager else {
-                // The vector read manager went away. This happens if users unset the vector read manager
-                // during channelRead. It's unlikely, but we tolerate it by aborting the read early.
-                break readLoop
-            }
-            buffer.clear()
-
-            // This force-unwrap is safe, as we checked whether this is nil in the caller.
-            let result = try vectorReadManager.readFromSocket(
-                buffer: &buffer,
-                reportExplicitCongestionNotifications: false) { msgvec in
-                return try self.socket.rea
-
-            }
-            switch result {
-            case .some(let results, let totalRead):
-                assert(self.isOpen)
-                assert(self.isActive)
-
-                let mayGrow = recvAllocator.record(actualReadBytes: totalRead)
-                readPending = false
-
-                var messageIterator = results.makeIterator()
-                while self.isActive, let message = messageIterator.next() {
-                    pipeline.fireChannelRead(NIOAny(message))
-                }
-
-                if mayGrow && i < maxMessagesPerRead {
-                    buffer = recvAllocator.buffer(allocator: allocator)
-                }
-                readResult = .some
-            case .none:
-                break readLoop
-            }
-        }
-
         return readResult
     }
 
@@ -221,9 +138,10 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
     }
     /// Buffer a write in preparation for a flush.
     override func bufferPendingWrite(data: NIOAny, promise: EventLoopPromise<Void>?) {
-        let data = data.forceAsByteEnvelope()
+        let data = data.forceAsByteBuffer()
 
-        if !self.pendingWrites.add(envelope: data, promise: promise) {
+        // TODO: This isn't in terms of addressedenvelope anymore.
+        if !self.pendingWrites.add(message: data, promise: promise) {
             assert(self.isActive)
             pipeline.fireChannelWritabilityChanged0()
         }
@@ -249,7 +167,7 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
 
     override func writeToSocket() throws -> OverallWriteResult {
         let result = try self.pendingWrites.triggerAppropriateWriteOperations(
-            scalarWriteOperation: { (ptr, destinationPtr, destinationSize, metadata) in
+            scalarWriteOperation: { ptr in
                 guard ptr.count > 0 else {
                     // No need to call write if the buffer is empty.
                     return .processed(0)
@@ -257,9 +175,6 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
                 // normal write
                 return try self.socket.write(pointer: ptr)
 
-            },
-            vectorWriteOperation: { msgs in
-                return try self.socket.writev(iovecs: UnsafeBufferPointer(rebasing: self.selectableEventLoop.iovecs.prefix(msgs.count)))
             }
         )
         return result
@@ -273,7 +188,7 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
     }
 
     func registrationFor(interested: SelectorEventSet) -> NIORegistration {
-        return .tupTapChannel(self, interested)
+        return .tunTapChannel(self, interested)
     }
 
     override func register(selector: Selector<NIORegistration>, interested: SelectorEventSet) throws {

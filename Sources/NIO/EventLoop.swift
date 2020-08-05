@@ -687,6 +687,7 @@ enum NIORegistration: Registration {
     case socketChannel(SocketChannel, SelectorEventSet)
     case datagramChannel(DatagramChannel, SelectorEventSet)
     case pipeChannel(PipeChannel, PipeChannel.Direction, SelectorEventSet)
+    case tunTapChannel(TunTapChannel, SelectorEventSet)
 
     /// The `SelectorEventSet` in which this `NIORegistration` is interested in.
     var interested: SelectorEventSet {
@@ -700,6 +701,8 @@ enum NIORegistration: Registration {
                 self = .datagramChannel(c, newValue)
             case .pipeChannel(let c, let d, _):
                 self = .pipeChannel(c, d, newValue)
+            case .tunTapChannel(let c, _):
+                self = .tunTapChannel(c, newValue)
             }
         }
         get {
@@ -711,6 +714,8 @@ enum NIORegistration: Registration {
             case .datagramChannel(_, let i):
                 return i
             case .pipeChannel(_, _, let i):
+                return i
+            case .tunTapChannel(_, let i):
                 return i
             }
         }

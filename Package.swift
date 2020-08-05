@@ -61,6 +61,8 @@ var targets: [PackageDescription.Target] = [
             dependencies: ["NIO"]),
     .target(name: "NIOUDPEchoClient",
             dependencies: ["NIO"]),
+    .target(name: "NIOTunExample",
+            dependencies: ["NIO"]),
     .target(name: "NIOTestUtils",
             dependencies: ["NIO", "NIOHTTP1"]),
     .target(name: "NIOCrashTester",

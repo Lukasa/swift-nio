@@ -414,6 +414,8 @@ internal final class SelectableEventLoop: EventLoop {
                             ev.io.formUnion([direction == .input ? .readEOF : .writeEOF])
                         }
                         self.handleEvent(ev.io, channel: chan)
+                    case .tunTapChannel(let chan, _):
+                        self.handleEvent(ev.io, channel: chan)
                     }
                 }
             }

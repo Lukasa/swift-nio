@@ -1090,3 +1090,119 @@ public final class NIOPipeBootstrap {
         }
     }
 }
+
+/// A `NIOTunTapBootstrap` is an easy way to bootstrap a `TunTapChannel` which provides access to IP or ethernet
+/// frames from a virtual network device on Linux.
+///
+/// Example bootstrapping a `Channel` with a tunnel device called `tun0`:
+///
+///     let channel = try NIOTunTapBootstrap(group: group)
+///                       .channelInitializer { channel in
+///                           channel.pipeline.addHandler(MyChannelHandler())
+///                       }
+///                       .withNamedTunDevice("tun0")
+///
+public final class NIOTunTapBootstrap {
+    private let group: EventLoopGroup
+    private var channelInitializer: Optional<ChannelInitializerCallback>
+    @usableFromInline
+    internal var _channelOptions: ChannelOptions.Storage
+
+    /// Create a `NIOTunTapBootstrap` on the `EventLoopGroup` `group`.
+    ///
+    /// The `EventLoopGroup` `group` must be compatible, otherwise the program will crash. `NIOTunTapBootstrap` is
+    /// compatible only with `MultiThreadedEventLoopGroup` as well as the `EventLoop`s returned by
+    /// `MultiThreadedEventLoopGroup.next`. See `init(validatingGroup:)` for a fallible initializer for
+    /// situations where it's impossible to tell ahead of time if the `EventLoopGroup`s are compatible or not.
+    ///
+    /// - parameters:
+    ///     - group: The `EventLoopGroup` to use.
+    public convenience init(group: EventLoopGroup) {
+        guard NIOOnSocketsBootstraps.isCompatible(group: group) else {
+            preconditionFailure("NIOTunTapBootstrap is only compatible with MultiThreadedEventLoopGroup and " +
+                                "SelectableEventLoop. You tried constructing one with \(group) which is incompatible.")
+        }
+        self.init(validatingGroup: group)!
+    }
+
+    /// Create a `NIOTunTapBootstrap` on the `EventLoopGroup` `group`, validating that `group` is compatible.
+    ///
+    /// - parameters:
+    ///     - group: The `EventLoopGroup` to use.
+    public init?(validatingGroup group: EventLoopGroup) {
+        guard NIOOnSocketsBootstraps.isCompatible(group: group) else {
+            return nil
+        }
+
+        self._channelOptions = ChannelOptions.Storage()
+        self.group = group
+        self.channelInitializer = nil
+    }
+
+    /// Initialize the connected `TunTapChannel` with `initializer`. The most common task in initializer is to add
+    /// `ChannelHandler`s to the `ChannelPipeline`.
+    ///
+    /// The connected `Channel` will operate on `ByteBuffer` as inbound and outbound messages. Please note that
+    /// `IOData.fileRegion` is _not_ supported for `TunTapChannel`s because `sendfile` only works on sockets.
+    ///
+    /// - parameters:
+    ///     - handler: A closure that initializes the provided `Channel`.
+    public func channelInitializer(_ handler: @escaping (Channel) -> EventLoopFuture<Void>) -> Self {
+        self.channelInitializer = handler
+        return self
+    }
+
+    /// Specifies a `ChannelOption` to be applied to the `TunTapChannel`.
+    ///
+    /// - parameters:
+    ///     - option: The option to be applied.
+    ///     - value: The value for the option.
+    @inlinable
+    public func channelOption<Option: ChannelOption>(_ option: Option, value: Option.Value) -> Self {
+        self._channelOptions.append(key: option, value: value)
+        return self
+    }
+
+    /// Create the `TunTapChannel` with a given named tun device.
+    ///
+    /// - parameters:
+    ///     - deviceName: The name of the tun device to create or attach to.
+    /// - returns: an `EventLoopFuture<Channel>` to deliver the `Channel`.
+    public func withNamedTunDevice(_ deviceName: String) -> EventLoopFuture<Channel> {
+        let eventLoop = self.group.next()
+
+        let channelInitializer = self.channelInitializer ?? { _ in eventLoop.makeSucceededFuture(()) }
+        let channel: TunTapChannel
+        do {
+            let handle = NIOFileHandle(descriptor: try TunTap.createTunDevice(named: deviceName))
+            channel = try TunTapChannel(eventLoop: eventLoop as! SelectableEventLoop, handle: handle)
+        } catch {
+            return eventLoop.makeFailedFuture(error)
+        }
+
+        func setupChannel() -> EventLoopFuture<Channel> {
+            eventLoop.assertInEventLoop()
+            return self._channelOptions.applyAllChannelOptions(to: channel).flatMap {
+                channelInitializer(channel)
+            }.flatMap {
+                eventLoop.assertInEventLoop()
+                let promise = eventLoop.makePromise(of: Void.self)
+                channel.registerAlreadyConfigured0(promise: promise)
+                return promise.futureResult
+            }.map {
+                channel
+            }.flatMapError { error in
+                channel.close0(error: error, mode: .all, promise: nil)
+                return channel.eventLoop.makeFailedFuture(error)
+            }
+        }
+
+        if eventLoop.inEventLoop {
+            return setupChannel()
+        } else {
+            return eventLoop.flatSubmit {
+                setupChannel()
+            }
+        }
+    }
+}

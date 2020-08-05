@@ -19,6 +19,7 @@
 #ifdef __linux__
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <sys/timerfd.h>
 #include <sys/sysinfo.h>
 #include <sys/socket.h>
@@ -26,6 +27,9 @@
 #include <errno.h>
 #include <pthread.h>
 #include <netinet/ip.h>
+#include <net/if.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
 
 // Some explanation is required here.
 //
@@ -73,5 +77,11 @@ const void *CNIOLinux_CMSG_DATA(const struct cmsghdr *);
 void *CNIOLinux_CMSG_DATA_MUTABLE(struct cmsghdr *);
 size_t CNIOLinux_CMSG_LEN(size_t);
 size_t CNIOLinux_CMSG_SPACE(size_t);
+
+// ifr stuff
+unsigned long CNIOLinux_get_tunsetiff(void);
+void CNIOLinux_ifr_setName(struct ifreq *ifr, const char *name);
+char *CNIOLinux_ifr_getName0(struct ifreq *ifr);
+void CNIOLinux_set_ifr_flags(struct ifreq *ifr, int flags);
 #endif
 #endif

@@ -25,6 +25,7 @@ void CNIOLinux_i_do_nothing_just_working_around_a_darwin_toolchain_bug(void) {}
 #include <stdio.h>
 #include <sys/prctl.h>
 #include <assert.h>
+#include <string.h>
 
 _Static_assert(sizeof(CNIOLinux_mmsghdr) == sizeof(struct mmsghdr),
                "sizes of CNIOLinux_mmsghdr and struct mmsghdr differ");
@@ -141,5 +142,23 @@ size_t CNIOLinux_CMSG_LEN(size_t payloadSizeBytes) {
 
 size_t CNIOLinux_CMSG_SPACE(size_t payloadSizeBytes) {
     return CMSG_SPACE(payloadSizeBytes);
+}
+
+unsigned long CNIOLinux_get_tunsetiff(void) {
+    return TUNSETIFF;
+}
+
+void CNIOLinux_ifr_setName(struct ifreq *ifr, const char *name) {
+    // We forcibly null-terminate here.
+    strncpy(ifr->ifr_name, name, IFNAMSIZ);
+    ifr->ifr_name[IFNAMSIZ - 1] = '\0';
+}
+
+char *CNIOLinux_ifr_getName0(struct ifreq *ifr) {
+    return ifr->ifr_name;
+}
+
+void CNIOLinux_set_ifr_flags(struct ifreq *ifr, int flags) {
+    ifr->ifr_flags = flags;
 }
 #endif

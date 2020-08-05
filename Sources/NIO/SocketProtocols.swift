@@ -47,6 +47,8 @@ protocol SocketProtocol: BaseSocketProtocol {
 
     func read(pointer: UnsafeMutableRawBufferPointer) throws -> IOResult<Int>
 
+    func readv(iovecs: UnsafeBufferPointer<IOVector>) throws -> IOResult<Int>
+
     func recvmsg(pointer: UnsafeMutableRawBufferPointer,
                  storage: inout sockaddr_storage,
                  storageLen: inout socklen_t,
