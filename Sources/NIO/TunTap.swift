@@ -53,7 +53,7 @@ internal enum TunTap {
 
         do {
             var ifr = ifreq()
-            CNIOLinux_set_ifr_flags(&ifr, IFF_TUN)
+            CNIOLinux_set_ifr_flags(&ifr, IFF_TUN | IFF_NO_PI)
 
             try name.withCString { ptr in
                 CNIOLinux_ifr_setName(&ifr, ptr)

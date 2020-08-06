@@ -40,6 +40,7 @@ var bootstrap = NIOTunTapBootstrap(group: group)
     .channelInitializer { channel in
         channel.pipeline.addHandlers([ReadHandler(), ErrorCatcher()])
     }
+    .channelOption(ChannelOptions.recvAllocator, value: FixedSizeRecvByteBufferAllocator(capacity: 2048))
 
 defer {
     try! group.syncShutdownGracefully()
