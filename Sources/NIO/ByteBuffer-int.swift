@@ -54,15 +54,15 @@ extension ByteBuffer {
 
         if T.self == UInt8.self {
             assert(range.count == 1)
-            return self.withUnsafeReadableBytes { ptr in
+            return self._withUnsafeReadableBytes { ptr in
                 ptr[range.startIndex] as! T
             }
         }
 
-        return self.withUnsafeReadableBytes { ptr in
+        return self._withUnsafeReadableBytes { ptr in
             var value: T = 0
             withUnsafeMutableBytes(of: &value) { valuePtr in
-                valuePtr.copyMemory(from: UnsafeRawBufferPointer(fastRebase: ptr[range]))
+                valuePtr.copyMemory(from: UnsafeRawBufferPointer(ptr[range]))
             }
             return _toEndianness(value: value, endianness: endianness)
         }

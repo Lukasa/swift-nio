@@ -30,11 +30,11 @@ extension ByteBuffer {
             return nil
         }
 
-        return self.withUnsafeReadableBytes { ptr in
+        return self._withUnsafeReadableBytes { ptr in
             // this is not technically correct because we shouldn't just bind
             // the memory to `UInt8` but it's not a real issue either and we
             // need to work around https://bugs.swift.org/browse/SR-9604
-            Array<UInt8>(UnsafeRawBufferPointer(fastRebase: ptr[range]).bindMemory(to: UInt8.self))
+            Array<UInt8>(UnsafeRawBufferPointer(ptr[range]).bindMemory(to: UInt8.self))
         }
     }
 
@@ -137,9 +137,9 @@ extension ByteBuffer {
         guard let range = self.rangeWithinReadableBytes(index: index, length: length) else {
             return nil
         }
-        return self.withUnsafeReadableBytes { pointer in
+        return self._withUnsafeReadableBytes { pointer in
             assert(range.lowerBound >= 0 && (range.upperBound - range.lowerBound) <= pointer.count)
-            return String(decoding: UnsafeRawBufferPointer(fastRebase: pointer[range]), as: Unicode.UTF8.self)
+            return String(decoding: UnsafeRawBufferPointer(pointer[range]), as: Unicode.UTF8.self)
         }
     }
 
@@ -227,8 +227,8 @@ extension ByteBuffer {
         guard let range = self.rangeWithinReadableBytes(index: index, length: length) else {
             return nil
         }
-        return self.withUnsafeReadableBytes { pointer in
-            return DispatchData(bytes: UnsafeRawBufferPointer(fastRebase: pointer[range]))
+        return self._withUnsafeReadableBytes { pointer in
+            return DispatchData(bytes: UnsafeRawBufferPointer(pointer[range]))
         }
     }
 

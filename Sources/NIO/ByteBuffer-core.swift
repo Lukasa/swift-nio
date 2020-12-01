@@ -379,7 +379,7 @@ public struct ByteBuffer {
 
     @inlinable
     mutating func _setBytesAssumingUniqueBufferAccess(_ bytes: UnsafeRawBufferPointer, at index: _Index) {
-        let targetPtr = UnsafeMutableRawBufferPointer(fastRebase: self._slicedStorageBuffer.dropFirst(Int(index)))
+        let targetPtr = self._slicedStorageBuffer.dropFirst(Int(index))
         targetPtr.copyMemory(from: bytes)
     }
 
@@ -389,8 +389,8 @@ public struct ByteBuffer {
     mutating func _setSlowPath<Bytes: Sequence>(bytes: Bytes, at index: _Index) -> _Capacity where Bytes.Element == UInt8 {
         func ensureCapacityAndReturnStorageBase(capacity: Int) -> UnsafeMutablePointer<UInt8> {
             self._ensureAvailableCapacity(_Capacity(capacity), at: index)
-            let newBytesPtr = UnsafeMutableRawBufferPointer(fastRebase: self._slicedStorageBuffer[Int(index) ..< Int(index) + Int(capacity)])
-            return newBytesPtr.bindMemory(to: UInt8.self).baseAddress!
+            let newBytesPtr = self._slicedStorageBuffer[Int(index) ..< Int(index) + Int(capacity)]
+            return newBytesPtr.baseAddress.bindMemory(to: UInt8.self, capacity: newBytesPtr.count)
         }
         let underestimatedByteCount = bytes.underestimatedCount
         let newPastEndIndex: _Index = index + _toIndex(underestimatedByteCount)
@@ -497,9 +497,9 @@ public struct ByteBuffer {
     }
 
     @inlinable
-    var _slicedStorageBuffer: UnsafeMutableRawBufferPointer {
-        return UnsafeMutableRawBufferPointer(start: self._storage.bytes.advanced(by: Int(self._slice.lowerBound)),
-                                             count: self._slice.count)
+    var _slicedStorageBuffer: UnsafeNonnullMutableRawBufferPointer {
+        return UnsafeNonnullMutableRawBufferPointer(start: self._storage.bytes.advanced(by: Int(self._slice.lowerBound)),
+                                                    count: self._slice.count)
     }
 
     /// Yields a mutable buffer pointer containing this `ByteBuffer`'s readable bytes. You may modify those bytes.
@@ -513,7 +513,7 @@ public struct ByteBuffer {
     public mutating func withUnsafeMutableReadableBytes<T>(_ body: (UnsafeMutableRawBufferPointer) throws -> T) rethrows -> T {
         self._copyStorageAndRebaseIfNeeded()
         let readerIndex = self.readerIndex
-        return try body(.init(fastRebase: self._slicedStorageBuffer[readerIndex ..< readerIndex + self.readableBytes]))
+        return try body(.init(self._slicedStorageBuffer[readerIndex ..< readerIndex + self.readableBytes]))
     }
 
     /// Yields the bytes currently writable (`bytesWritable` = `capacity` - `writerIndex`). Before reading those bytes you must first
@@ -529,7 +529,7 @@ public struct ByteBuffer {
     @inlinable
     public mutating func withUnsafeMutableWritableBytes<T>(_ body: (UnsafeMutableRawBufferPointer) throws -> T) rethrows -> T {
         self._copyStorageAndRebaseIfNeeded()
-        return try body(.init(fastRebase: self._slicedStorageBuffer.dropFirst(self.writerIndex)))
+        return try body(.init(self._slicedStorageBuffer.dropFirst(self.writerIndex)))
     }
 
     /// This vends a pointer of the `ByteBuffer` at the `writerIndex` after ensuring that the buffer has at least `minimumWritableBytes` of writable bytes available.
@@ -586,8 +586,22 @@ public struct ByteBuffer {
     /// - returns: The value returned by `body`.
     @inlinable
     public func withUnsafeReadableBytes<T>(_ body: (UnsafeRawBufferPointer) throws -> T) rethrows -> T {
+        return try self._withUnsafeReadableBytes { try body(.init($0)) }
+    }
+
+    /// Yields a buffer pointer containing this `ByteBuffer`'s readable bytes. Only used internally,
+    /// as this method preserves the known-nonnull nature of the base pointer.
+    ///
+    /// - warning: Do not escape the pointer from the closure for later use.
+    ///
+    /// - parameters:
+    ///     - body: The closure that will accept the yielded bytes.
+    /// - returns: The value returned by `body`.
+    @inlinable
+    func _withUnsafeReadableBytes<T>(_ body: (UnsafeNonnullRawBufferPointer) throws -> T) rethrows -> T {
         let readerIndex = self.readerIndex
-        return try body(.init(fastRebase: self._slicedStorageBuffer[readerIndex ..< readerIndex + self.readableBytes]))
+        let writerIndex = self.writerIndex
+        return try body(.init(self._slicedStorageBuffer[readerIndex ..< writerIndex]))
     }
 
     /// Yields a buffer pointer containing this `ByteBuffer`'s readable bytes. You may hold a pointer to those bytes
@@ -605,7 +619,8 @@ public struct ByteBuffer {
     public func withUnsafeReadableBytesWithStorageManagement<T>(_ body: (UnsafeRawBufferPointer, Unmanaged<AnyObject>) throws -> T) rethrows -> T {
         let storageReference: Unmanaged<AnyObject> = Unmanaged.passUnretained(self._storage)
         let readerIndex = self.readerIndex
-        return try body(.init(fastRebase: self._slicedStorageBuffer[readerIndex ..< readerIndex + self.readableBytes]),
+        let writerIndex = self.writerIndex
+        return try body(.init(self._slicedStorageBuffer[readerIndex ..< writerIndex]),
                         storageReference)
     }
 
@@ -930,11 +945,11 @@ extension ByteBuffer: Equatable {
             return true
         }
 
-        return lhs.withUnsafeReadableBytes { lPtr in
-            rhs.withUnsafeReadableBytes { rPtr in
+        return lhs._withUnsafeReadableBytes { lPtr in
+            rhs._withUnsafeReadableBytes { rPtr in
                 // Shouldn't get here otherwise because of readableBytes check
                 assert(lPtr.count == rPtr.count)
-                return memcmp(lPtr.baseAddress!, rPtr.baseAddress!, lPtr.count) == 0
+                return memcmp(lPtr.baseAddress, rPtr.baseAddress, lPtr.count) == 0
             }
         }
     }
