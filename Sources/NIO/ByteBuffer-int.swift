@@ -59,13 +59,11 @@ extension ByteBuffer {
             }
         }
 
-        return self.withUnsafeReadableBytes { ptr in
-            var value: T = 0
-            withUnsafeMutableBytes(of: &value) { valuePtr in
-                valuePtr.copyMemory(from: UnsafeRawBufferPointer(fastRebase: ptr[range]))
-            }
-            return _toEndianness(value: value, endianness: endianness)
+        var value: T = 0
+        withUnsafeMutableBytes(of: &value) { valuePtr in
+            self._copyBytes(rangeWithinReadableBytes: range, into: valuePtr.baseAddress!)
         }
+        return _toEndianness(value: value, endianness: endianness)
     }
 
     /// Write `integer` into this `ByteBuffer`, moving the writer index forward appropriately.

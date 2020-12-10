@@ -222,11 +222,17 @@ public struct ByteBuffer {
     // MARK: Internal _Storage for CoW
     @usableFromInline final class _Storage {
         private(set) var capacity: _Capacity
-        @usableFromInline private(set) var bytes: UnsafeMutableRawPointer
+        private var _bytes: UnsafeMutableRawPointer
         private let allocator: ByteBufferAllocator
 
+        // This awkward getter is used to avoid a swift_beginAccess call that we'd
+        // get if we had @usableFromInline on the actual storage.
+        @usableFromInline internal var bytes: UnsafeMutableRawPointer {
+            return self._bytes
+        }
+
         public init(bytesNoCopy: UnsafeMutableRawPointer, capacity: _Capacity, allocator: ByteBufferAllocator) {
-            self.bytes = bytesNoCopy
+            self._bytes = bytesNoCopy
             self.capacity = capacity
             self.allocator = allocator
         }
@@ -269,12 +275,12 @@ public struct ByteBuffer {
             let ptr = self.allocator.realloc(self.bytes, size_t(newCapacity))!
             /* bind the memory so we can assume it elsewhere to be bound to UInt8 */
             ptr.bindMemory(to: UInt8.self, capacity: Int(newCapacity))
-            self.bytes = ptr
+            self._bytes = ptr
             self.capacity = newCapacity
         }
 
         private func deallocate() {
-            self.allocator.free(self.bytes)
+            self.allocator.free(self._bytes)
         }
 
         public static func reallocated(minimumCapacity: _Capacity, allocator: Allocator) -> _Storage {
@@ -364,7 +370,15 @@ public struct ByteBuffer {
         self._moveWriterIndex(to: newIndex)
     }
 
+    // This is inline(never) because this code is extremely hot. All set/write functions eventually
+    // come into this code. As it only takes concrete, trivial types, there is minimal benefit in
+    // actually inlining it, and there is both code size and cache performance benefits to keeping it separate.
+    // It also encourages the compiler to inline things _into_ this method.
+    //
+    // However, the method remains inlinable so that compilers of other modules can observe what is _done_ inside
+    // here to avoid excessive ARC traffic.
     @inlinable
+    @inline(never)
     mutating func _setBytes(_ bytes: UnsafeRawBufferPointer, at index: _Index) -> _Capacity {
         let bytesCount = bytes.count
         let newEndIndex: _Index = index + _toIndex(bytesCount)
@@ -420,6 +434,28 @@ public struct ByteBuffer {
         } else {
             return self._setSlowPath(bytes: bytes, at: index)
         }
+    }
+
+    // This is inline(never) because this code is extremely hot. All get/read functions eventually
+    // come into this code. As it only takes concrete, trivial types, there is minimal benefit in
+    // actually inlining it, and there is both code size and cache performance benefits to keeping it separate.
+    // It also encourages the compiler to inline things _into_ this method.
+    //
+    // However, the method remains inlinable so that compilers of other modules can observe what is _done_ inside
+    // here to avoid excessive ARC traffic.
+    @inlinable
+    @inline(never)
+    func _copyBytes(rangeWithinReadableBytes range: Range<Int>, into target: UnsafeMutableRawPointer) {
+        // Validate expected invariants. Confirm that we are reading in-bounds. These invariants must be maintained
+        // by the caller.
+        assert(range.lowerBound >= 0)
+        assert(range.upperBound <= self.readableBytes)
+
+        // Unchecked arithmetic is fine here: the bounds must have already been checked elsewhere.
+        let basePointerOffset = Int(self._readerIndex) &+ range.lowerBound
+        let endPointerOffset = Int(self._readerIndex) &+ range.upperBound
+        let sourcePointer = UnsafeRawBufferPointer(fastRebase: self._slicedStorageBuffer[basePointerOffset ..< endPointerOffset])
+        target.copyMemory(from: sourcePointer.baseAddress!, byteCount: Int(range.count))
     }
 
     // MARK: Public Core API
@@ -497,6 +533,7 @@ public struct ByteBuffer {
     }
 
     @inlinable
+    @inline(never)
     var _slicedStorageBuffer: UnsafeMutableRawBufferPointer {
         return UnsafeMutableRawBufferPointer(start: self._storage.bytes.advanced(by: Int(self._slice.lowerBound)),
                                              count: self._slice.count)
