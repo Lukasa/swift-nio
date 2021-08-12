@@ -229,7 +229,7 @@ typealias IOVector = iovec
         var vec = iovec(iov_base: pointer.baseAddress, iov_len: numericCast(pointer.count))
 
         return try withUnsafeMutablePointer(to: &vec) { vecPtr in
-            return try storage.withMutableSockAddr { (sockaddrPtr, _) in
+            return try withMutableSockAddr(for: &storage) { (sockaddrPtr, _) in
 #if os(Windows)
                 var messageHeader =
                     WSAMSG(name: sockaddrPtr, namelen: storageLen,

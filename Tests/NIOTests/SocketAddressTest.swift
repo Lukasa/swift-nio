@@ -183,19 +183,19 @@ class SocketAddressTest: XCTestCase {
             _ = withUnsafeMutableBytes(of: &storage) { temp in
                 memcpy(temp.baseAddress!, outer.baseAddress!, MemoryLayout<sockaddr_in>.size)
             }
-            return storage.convert()
+            return convert(&storage)
         }
         var secondCopy: sockaddr_in6 = withUnsafeBytes(of: &secondIPAddress) { outer in
             _ = withUnsafeMutableBytes(of: &storage) { temp in
                 memcpy(temp.baseAddress!, outer.baseAddress!, MemoryLayout<sockaddr_in6>.size)
             }
-            return storage.convert()
+            return convert(&storage)
         }
         var thirdCopy: sockaddr_un = withUnsafeBytes(of: &thirdIPAddress) { outer in
             _ = withUnsafeMutableBytes(of: &storage) { temp in
                 memcpy(temp.baseAddress!, outer.baseAddress!, MemoryLayout<sockaddr_un>.size)
             }
-            return storage.convert()
+            return convert(&storage)
         }
 
         XCTAssertEqual(memcmp(&firstIPAddress, &firstCopy, MemoryLayout<sockaddr_in>.size), 0)
@@ -363,7 +363,7 @@ class SocketAddressTest: XCTestCase {
     func testCanMutateSockaddrStorage() throws {
         var storage = sockaddr_storage()
         XCTAssertEqual(storage.ss_family, 0)
-        storage.withMutableSockAddr { (addr, _) in
+        withMutableSockAddr(for: &storage) { (addr, _) in
             addr.pointee.sa_family = sa_family_t(NIOBSDSocket.AddressFamily.unix.rawValue)
         }
         XCTAssertEqual(storage.ss_family, sa_family_t(NIOBSDSocket.AddressFamily.unix.rawValue))

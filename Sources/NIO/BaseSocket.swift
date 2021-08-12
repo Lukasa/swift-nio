@@ -71,63 +71,64 @@ protocol Registration {
 // https://bugs.swift.org/browse/SR-2749 on Ubuntu 14.04: basically, we need to
 // avoid getting the Swift compiler to copy the sockaddr_storage for any reason:
 // only our rebinding copy here is allowed.
-extension sockaddr_storage {
-    mutating func withMutableSockAddr<R>(_ body: (UnsafeMutablePointer<sockaddr>, Int) throws -> R) rethrows -> R {
-        return try withUnsafeMutableBytes(of: &self) { p in
-            try body(p.baseAddress!.assumingMemoryBound(to: sockaddr.self), p.count)
+//
+// Additionally annoyingly, due to working around https://bugs.swift.org/browse/SR-14268 these
+// are free functions, instead of functions in an extension.
+func withMutableSockAddr<R>(for addr: inout sockaddr_storage, _ body: (UnsafeMutablePointer<sockaddr>, Int) throws -> R) rethrows -> R {
+    return try withUnsafeMutableBytes(of: &addr) { p in
+        try body(p.baseAddress!.assumingMemoryBound(to: sockaddr.self), p.count)
+    }
+}
+
+/// Converts the `socketaddr_storage` to a `sockaddr_in`.
+///
+/// This will crash if `ss_family` != AF_INET!
+func convert(_ addr: inout sockaddr_storage) -> sockaddr_in {
+    precondition(addr.ss_family == NIOBSDSocket.AddressFamily.inet.rawValue)
+    return withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+            $0.pointee
         }
     }
+}
 
-    /// Converts the `socketaddr_storage` to a `sockaddr_in`.
-    ///
-    /// This will crash if `ss_family` != AF_INET!
-    mutating func convert() -> sockaddr_in {
-        precondition(self.ss_family == NIOBSDSocket.AddressFamily.inet.rawValue)
-        return withUnsafePointer(to: &self) {
-            $0.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
-                $0.pointee
-            }
+/// Converts the `socketaddr_storage` to a `sockaddr_in6`.
+///
+/// This will crash if `ss_family` != AF_INET6!
+func convert(_ addr: inout sockaddr_storage) -> sockaddr_in6 {
+    precondition(addr.ss_family == NIOBSDSocket.AddressFamily.inet6.rawValue)
+    return withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
+            $0.pointee
         }
     }
+}
 
-    /// Converts the `socketaddr_storage` to a `sockaddr_in6`.
-    ///
-    /// This will crash if `ss_family` != AF_INET6!
-    mutating func convert() -> sockaddr_in6 {
-        precondition(self.ss_family == NIOBSDSocket.AddressFamily.inet6.rawValue)
-        return withUnsafePointer(to: &self) {
-            $0.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
-                $0.pointee
-            }
+/// Converts the `socketaddr_storage` to a `sockaddr_un`.
+///
+/// This will crash if `ss_family` != AF_UNIX!
+func convert(_ addr: inout sockaddr_storage) -> sockaddr_un {
+    precondition(addr.ss_family == NIOBSDSocket.AddressFamily.unix.rawValue)
+    return withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr_un.self, capacity: 1) {
+            $0.pointee
         }
     }
+}
 
-    /// Converts the `socketaddr_storage` to a `sockaddr_un`.
-    ///
-    /// This will crash if `ss_family` != AF_UNIX!
-    mutating func convert() -> sockaddr_un {
-        precondition(self.ss_family == NIOBSDSocket.AddressFamily.unix.rawValue)
-        return withUnsafePointer(to: &self) {
-            $0.withMemoryRebound(to: sockaddr_un.self, capacity: 1) {
-                $0.pointee
-            }
-        }
-    }
-
-    /// Converts the `socketaddr_storage` to a `SocketAddress`.
-    mutating func convert() -> SocketAddress {
-        switch NIOBSDSocket.AddressFamily(rawValue: CInt(self.ss_family)) {
-        case .inet:
-            let sockAddr: sockaddr_in = self.convert()
-            return SocketAddress(sockAddr)
-        case .inet6:
-            let sockAddr: sockaddr_in6 = self.convert()
-            return SocketAddress(sockAddr)
-        case .unix:
-            return SocketAddress(self.convert() as sockaddr_un)
-        default:
-            fatalError("unknown sockaddr family \(self.ss_family)")
-        }
+/// Converts the `socketaddr_storage` to a `SocketAddress`.
+func convert(_ addr: inout sockaddr_storage) -> SocketAddress {
+    switch NIOBSDSocket.AddressFamily(rawValue: CInt(addr.ss_family)) {
+    case .inet:
+        let sockAddr: sockaddr_in = convert(&addr)
+        return SocketAddress(sockAddr)
+    case .inet6:
+        let sockAddr: sockaddr_in6 = convert(&addr)
+        return SocketAddress(sockAddr)
+    case .unix:
+        return SocketAddress(convert(&addr) as sockaddr_un)
+    default:
+        fatalError("unknown sockaddr family \(addr.ss_family)")
     }
 }
 
@@ -193,14 +194,14 @@ class BaseSocket: BaseSocketProtocol {
     private func get_addr(_ body: (NIOBSDSocket.Handle, UnsafeMutablePointer<sockaddr>, UnsafeMutablePointer<socklen_t>) throws -> Void) throws -> SocketAddress {
         var addr = sockaddr_storage()
 
-        try addr.withMutableSockAddr { addressPtr, size in
+        try withMutableSockAddr(for: &addr) { addressPtr, size in
             var size = socklen_t(size)
 
             try self.withUnsafeHandle {
                 try body($0, addressPtr, &size)
             }
         }
-        return addr.convert()
+        return convert(&addr)
     }
 
     /// Create a new socket and return the file descriptor of it.

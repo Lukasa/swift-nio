@@ -585,7 +585,7 @@ final class DatagramChannel: BaseSocketChannel<Socket> {
                     metadata = nil
                 }
 
-                let msg = AddressedEnvelope(remoteAddress: rawAddress.convert(),
+                let msg = AddressedEnvelope(remoteAddress: convert(&rawAddress),
                                             data: buffer,
                                             metadata: metadata)
                 assert(self.isActive)
