@@ -115,7 +115,7 @@ private class BetterHTTPParser {
             BetterHTTPParser.fromOpaque(opaque).didReceiveMessageCompleteNotification()
             // Temporary workaround for https://github.com/nodejs/llhttp/issues/202, should be removed
             // when that issue is fixed. We're tracking the work in https://github.com/apple/swift-nio/issues/2274.
-            opaque?.pointee.content_length = 0
+            opaque.map { c_nio_llhttp_reset($0) }
             return 0
         }
         self.withExclusiveHTTPParser { parserPtr in
