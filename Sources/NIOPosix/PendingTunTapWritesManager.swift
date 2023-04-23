@@ -2,7 +2,7 @@
 //
 // This source file is part of the SwiftNIO open source project
 //
-// Copyright (c) 2020 Apple Inc. and the SwiftNIO project authors
+// Copyright (c) 2020-2023 Apple Inc. and the SwiftNIO project authors
 // Licensed under Apache License v2.0
 //
 // See LICENSE.txt for license information
@@ -11,7 +11,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+import Atomics
 import NIOConcurrencyHelpers
+import NIOCore
 
 private struct PendingTunTapWrite {
     var data: ByteBuffer
@@ -189,8 +191,9 @@ final class PendingTunTapWritesManager: PendingWritesManager {
     private var state = PendingTunTapWritesState()
 
     internal var waterMark: ChannelOptions.Types.WriteBufferWaterMark = ChannelOptions.Types.WriteBufferWaterMark(low: 32 * 1024, high: 64 * 1024)
-    internal let channelWritabilityFlag: NIOAtomic<Bool> = .makeAtomic(value: true)
+    internal let channelWritabilityFlag = ManagedAtomic(true)
     internal var writeSpinCount: UInt = 16
+    internal var publishedWritability = true
     private(set) var isOpen = true
 
     init() {}
@@ -220,8 +223,10 @@ final class PendingTunTapWritesManager: PendingWritesManager {
         assert(self.isOpen)
         self.state.append(.init(data: message, promise: promise))
 
-        if self.state.bytes > waterMark.high && channelWritabilityFlag.compareAndExchange(expected: true, desired: false) {
+        if self.state.bytes > waterMark.high &&
+            channelWritabilityFlag.compareExchange(expected: true, desired: false, ordering: .relaxed).exchanged {
             // Returns false to signal the Channel became non-writable and we need to notify the user
+            self.publishedWritability = false
             return false
         }
         return true
@@ -262,7 +267,7 @@ final class PendingTunTapWritesManager: PendingWritesManager {
         let (promise, result) = self.state.didWrite(data)
 
         if self.state.bytes < self.waterMark.low {
-            self.channelWritabilityFlag.store(true)
+            self.channelWritabilityFlag.store(true, ordering: .relaxed)
         }
 
         self.fulfillPromise(promise)

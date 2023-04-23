@@ -23,7 +23,7 @@ struct NIORegistration: Registration {
         case socketChannel(SocketChannel)
         case datagramChannel(DatagramChannel)
         case pipeChannel(PipeChannel, PipeChannel.Direction)
-        case tunTapChannel(TunTapChannel, SelectorEventSet)
+        case tunTapChannel(TunTapChannel)
     }
 
     var channel: ChannelType

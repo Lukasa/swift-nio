@@ -11,7 +11,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
-import NIO
+import NIOCore
+import NIOPosix
 
 class ReadHandler: ChannelInboundHandler {
     typealias InboundIn = ByteBuffer

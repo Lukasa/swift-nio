@@ -2,7 +2,7 @@
 //
 // This source file is part of the SwiftNIO open source project
 //
-// Copyright (c) 2020 Apple Inc. and the SwiftNIO project authors
+// Copyright (c) 2020-2023 Apple Inc. and the SwiftNIO project authors
 // Licensed under Apache License v2.0
 //
 // See LICENSE.txt for license information
@@ -11,6 +11,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 //===----------------------------------------------------------------------===//
+import NIOCore
 
 /// A channel used with tun/tap file descriptors in Linux
 final class TunTapChannel: BaseSocketChannel<PipePair> {
@@ -37,7 +38,8 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
         try super.init(socket: pipe,
                        parent: nil,
                        eventLoop: eventLoop,
-                       recvAllocator: FixedSizeRecvByteBufferAllocator(capacity: 2048))
+                       recvAllocator: FixedSizeRecvByteBufferAllocator(capacity: 2048),
+                       supportReconnect: false)
     }
 
     // MARK: TunTapChannel overrides required by BaseSocketChannel
@@ -87,37 +89,35 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
     }
 
     override func readFromSocket() throws -> ReadResult {
-        var buffer = self.recvAllocator.buffer(allocator: self.allocator)
-        var readResult = ReadResult.none
+        var result = ReadResult.none
 
-        for i in 1...self.maxMessagesPerRead {
+        for _ in 1...self.maxMessagesPerRead {
             guard self.isOpen else {
                 throw ChannelError.eof
             }
-            buffer.clear()
 
-            let result = try buffer.withMutableWritePointer {
-                try self.socket.read(pointer: $0)
+            let (buffer, readResult) = try self.recvBufferPool.buffer(allocator: self.allocator) { buffer in
+                try buffer.withMutableWritePointer { pointer in
+                    try self.socket.read(pointer: pointer)
+                }
             }
-            switch result {
+            
+            switch readResult {
             case .processed(let bytesRead):
                 assert(bytesRead > 0)
                 assert(self.isOpen)
-                let mayGrow = recvAllocator.record(actualReadBytes: bytesRead)
+                self.recvBufferPool.record(actualReadBytes: bytesRead)
                 readPending = false
 
                 assert(self.isActive)
-                pipeline.fireChannelRead0(NIOAny(buffer))
-                if mayGrow && i < maxMessagesPerRead {
-                    buffer = recvAllocator.buffer(allocator: allocator)
-                }
-                readResult = .some
+                pipeline.fireChannelRead(NIOAny(buffer))
+                result = .some
             case .wouldBlock(let bytesRead):
                 assert(bytesRead == 0)
-                return readResult
+                return result
             }
         }
-        return readResult
+        return result
     }
 
     override func shouldCloseOnReadError(_ err: Error) -> Bool {
@@ -138,12 +138,12 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
     }
     /// Buffer a write in preparation for a flush.
     override func bufferPendingWrite(data: NIOAny, promise: EventLoopPromise<Void>?) {
-        let data = data.forceAsByteBuffer()
+        let data = self.unwrapData(data, as: ByteBuffer.self)
 
         // TODO: This isn't in terms of addressedenvelope anymore.
         if !self.pendingWrites.add(message: data, promise: promise) {
             assert(self.isActive)
-            pipeline.fireChannelWritabilityChanged0()
+            pipeline.fireChannelWritabilityChanged()
         }
     }
 
@@ -187,13 +187,15 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
         promise?.fail(ChannelError.operationUnsupported)
     }
 
-    func registrationFor(interested: SelectorEventSet) -> NIORegistration {
-        return .tunTapChannel(self, interested)
+    func registrationFor(interested: SelectorEventSet, registrationID: SelectorRegistrationID) -> NIORegistration {
+        return NIORegistration(channel: .tunTapChannel(self),
+                               interested: interested,
+                               registrationID: registrationID)
     }
 
     override func register(selector: Selector<NIORegistration>, interested: SelectorEventSet) throws {
         // TODO: We should probably not abuse PipePair this way.
-        try selector.register(selectable: self.socket.inputFD, interested: interested, makeRegistration: self.registrationFor(interested:))
+        try selector.register(selectable: self.socket.inputFD, interested: interested, makeRegistration: self.registrationFor(interested:registrationID:))
     }
 
     override func deregister(selector: Selector<NIORegistration>, mode: CloseMode) throws {
