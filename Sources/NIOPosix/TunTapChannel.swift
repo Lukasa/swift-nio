@@ -14,7 +14,7 @@
 import NIOCore
 
 /// A channel used with tun/tap file descriptors in Linux
-final class TunTapChannel: BaseSocketChannel<PipePair> {
+final class TunTapChannel: BaseSocketChannel<TunTapSocket> {
     private let pendingWrites: PendingTunTapWritesManager
 
     // This is `Channel` API so must be thread-safe.
@@ -29,13 +29,10 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
     }
 
     init(eventLoop: SelectableEventLoop, handle: NIOFileHandle) throws {
-        let extraHandle = try handle.withUnsafeFileDescriptor {
-            NIOFileHandle(descriptor: dup($0))
-        }
-        let pipe = try PipePair(inputFD: handle, outputFD: extraHandle)
+        let socket = try TunTapSocket(tunTapSocket: handle)
         self.pendingWrites = PendingTunTapWritesManager()
 
-        try super.init(socket: pipe,
+        try super.init(socket: socket,
                        parent: nil,
                        eventLoop: eventLoop,
                        recvAllocator: FixedSizeRecvByteBufferAllocator(capacity: 2048),
@@ -194,17 +191,16 @@ final class TunTapChannel: BaseSocketChannel<PipePair> {
     }
 
     override func register(selector: Selector<NIORegistration>, interested: SelectorEventSet) throws {
-        // TODO: We should probably not abuse PipePair this way.
-        try selector.register(selectable: self.socket.inputFD, interested: interested, makeRegistration: self.registrationFor(interested:registrationID:))
+        try selector.register(selectable: self.socket.fd, interested: interested, makeRegistration: self.registrationFor(interested:registrationID:))
     }
 
     override func deregister(selector: Selector<NIORegistration>, mode: CloseMode) throws {
         assert(mode == .all)
-        try selector.deregister(selectable: self.socket.inputFD)
+        try selector.deregister(selectable: self.socket.fd)
     }
 
     override func reregister(selector: Selector<NIORegistration>, interested: SelectorEventSet) throws {
-        try selector.reregister(selectable: self.socket.inputFD, interested: interested)
+        try selector.reregister(selectable: self.socket.fd, interested: interested)
     }
 }
 
