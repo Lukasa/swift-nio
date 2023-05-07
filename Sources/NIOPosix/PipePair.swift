@@ -27,6 +27,10 @@ struct SelectableFileHandle {
     func close() throws {
         try handle.close()
     }
+
+    func takeDescriptorOwnership() throws -> CInt {
+        return try handle.takeDescriptorOwnership()
+    }
 }
 
 extension SelectableFileHandle: Selectable {

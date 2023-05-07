@@ -482,6 +482,100 @@ class HookedSocket: Socket, UserKernelInterface {
     }
 }
 
+class HookedTunTapSocket: TunTapSocket, UserKernelInterface {
+    fileprivate let userToKernel: LockedBox<UserToKernel>
+    fileprivate let kernelToUser: LockedBox<KernelToUser>
+
+    init(userToKernel: LockedBox<UserToKernel>, kernelToUser: LockedBox<KernelToUser>, fd: NIOFileHandle) throws {
+        self.userToKernel = userToKernel
+        self.kernelToUser = kernelToUser
+        try super.init(tunTapSocket: fd)
+    }
+
+    override func ignoreSIGPIPE() throws {
+        try self.fd.withUnsafeHandle { fd in
+            try self.userToKernel.waitForEmptyAndSet(.disableSIGPIPE(fd))
+            let ret = try self.waitForKernelReturn()
+            if case .returnVoid = ret {
+                return
+            } else {
+                throw UnexpectedKernelReturn(ret)
+            }
+        }
+    }
+
+    override func read(pointer: UnsafeMutableRawBufferPointer) throws -> IOResult<Int> {
+        try self.userToKernel.waitForEmptyAndSet(.read(pointer.count))
+        let ret = try self.waitForKernelReturn()
+        if case .returnBytes(let buffer) = ret {
+            assert(buffer.readableBytes <= pointer.count)
+            pointer.copyBytes(from: buffer.readableBytesView)
+            return .processed(buffer.readableBytes)
+        } else {
+            throw UnexpectedKernelReturn(ret)
+        }
+    }
+
+    override func write(pointer: UnsafeRawBufferPointer) throws -> IOResult<Int> {
+        return try self.fd.withUnsafeHandle { fd in
+            var buffer = ByteBufferAllocator().buffer(capacity: pointer.count)
+            buffer.writeBytes(pointer)
+            try self.userToKernel.waitForEmptyAndSet(.write(fd, buffer))
+            let ret = try self.waitForKernelReturn()
+            if case .returnIOResultInt(let result) = ret {
+                return result
+            } else {
+                throw UnexpectedKernelReturn(ret)
+            }
+        }
+    }
+
+    override func writev(iovecs: UnsafeBufferPointer<IOVector>) throws -> IOResult<Int> {
+        return try self.fd.withUnsafeHandle { fd in
+            let buffers = iovecs.map { iovec -> ByteBuffer in
+                #if os(Android)
+                var buffer = ByteBufferAllocator().buffer(capacity: Int(iovec.iov_len))
+                buffer.writeBytes(UnsafeRawBufferPointer(start: iovec.iov_base, count: Int(iovec.iov_len)))
+                #else
+                var buffer = ByteBufferAllocator().buffer(capacity: iovec.iov_len)
+                buffer.writeBytes(UnsafeRawBufferPointer(start: iovec.iov_base, count: iovec.iov_len))
+                #endif
+                return buffer
+            }
+
+            try self.userToKernel.waitForEmptyAndSet(.writev(fd, buffers))
+            let ret = try self.waitForKernelReturn()
+            if case .returnIOResultInt(let result) = ret {
+                return result
+            } else {
+                throw UnexpectedKernelReturn(ret)
+            }
+        }
+    }
+
+    override func close() throws {
+        let fd = try self.fd.takeDescriptorOwnership()
+
+        try self.userToKernel.waitForEmptyAndSet(.close(fd))
+        let ret = try self.waitForKernelReturn()
+        if case .returnVoid = ret {
+            return
+        } else {
+            throw UnexpectedKernelReturn(ret)
+        }
+    }
+
+    override func setOption<T>(level: NIOBSDSocket.OptionLevel, name: NIOBSDSocket.Option, value: T) throws {
+        try self.userToKernel.waitForEmptyAndSet(.setOption(level, name, value))
+        let ret = try self.waitForKernelReturn()
+        if case .returnVoid = ret {
+            return
+        } else {
+            throw UnexpectedKernelReturn(ret)
+        }
+    }
+}
+
 extension HookedSelector {
     func assertSyscallAndReturn(_ result: KernelToUser,
                                 file: StaticString = #filePath,
@@ -621,6 +715,22 @@ extension SALTest {
         return channel
     }
 
+    private func makeTunTapSocketChannel(eventLoop: SelectableEventLoop,
+                                         file: StaticString = #filePath, line: UInt = #line) throws -> TunTapChannel {
+        let channel = try eventLoop.runSAL(syscallAssertions: {
+            try self.assertdisableSIGPIPE(expectedFD: .max, result: .success(()))
+            try self.assertLocalAddress(address: nil)
+            try self.assertRemoteAddress(address: nil)
+        }) {
+            try TunTapChannel(socket: HookedTunTapSocket(userToKernel: self.userToKernelBox,
+                                                         kernelToUser: self.kernelToUserBox,
+                                                         fd: NIOFileHandle(descriptor: .max)),
+                              eventLoop: eventLoop)
+        }
+        try self.assertParkedRightNow()
+        return channel
+    }
+
     private func makeServerSocketChannel(eventLoop: SelectableEventLoop,
                                          group: MultiThreadedEventLoopGroup,
                                          file: StaticString = #filePath, line: UInt = #line) throws -> ServerSocketChannel {
@@ -754,6 +864,14 @@ extension SALTest {
             try self.assertdisableSIGPIPE(expectedFD: .max, result: .success(()))
         }) {
             try HookedSocket(userToKernel: self.userToKernelBox, kernelToUser: self.kernelToUserBox, socket: .max)
+        }
+    }
+
+    func makeHookedTuntapSocket() throws -> HookedTunTapSocket {
+        return try self.loop.runSAL(syscallAssertions: {
+            try self.assertdisableSIGPIPE(expectedFD: .max, result: .success(()))
+        }) {
+            try HookedTunTapSocket(userToKernel: self.userToKernelBox, kernelToUser: self.kernelToUserBox, fd: NIOFileHandle(descriptor: .max))
         }
     }
 

@@ -39,6 +39,17 @@ final class TunTapChannel: BaseSocketChannel<TunTapSocket> {
                        supportReconnect: false)
     }
 
+    init(socket: TunTapSocket, parent: Channel? = nil, eventLoop: SelectableEventLoop) throws {
+        self.pendingWrites = PendingTunTapWritesManager()
+        try super.init(
+            socket: socket,
+            parent: parent,
+            eventLoop: eventLoop,
+            recvAllocator: FixedSizeRecvByteBufferAllocator(capacity: 2048),
+            supportReconnect: false
+        )
+    }
+
     // MARK: TunTapChannel overrides required by BaseSocketChannel
 
     override func setOption0<Option: ChannelOption>(_ option: Option, value: Option.Value) throws {

@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 import NIOCore
 
-final class TunTapSocket: SocketProtocol {
+class TunTapSocket: SocketProtocol {
     typealias SelectableType = SelectableFileHandle
 
     let fd: SelectableFileHandle
